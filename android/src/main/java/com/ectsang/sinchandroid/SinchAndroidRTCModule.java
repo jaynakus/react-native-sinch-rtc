@@ -41,9 +41,9 @@ public class SinchAndroidRTCModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void init(String applicationKey,
-                                       String applicationSecret,
-                                       String environmentHost,
-                                       String userId) {
+                     String applicationSecret,
+                     String environmentHost,
+                     String userId) {
 
         sinchClient = Sinch.getSinchClientBuilder()
                 .context(mContext)

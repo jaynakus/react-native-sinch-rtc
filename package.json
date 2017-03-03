@@ -23,6 +23,6 @@
   },
   "homepage": "https://github.com/Ectsang/react-native-sinch-rtc",
   "dependencies": {
-    "react-native": "^0.24.1"
+    "react-native": "^0.41.2"
   }
 }
