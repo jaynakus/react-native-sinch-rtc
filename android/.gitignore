@@ -2,3 +2,4 @@
 build
 *.iml
 gen
+local.properties

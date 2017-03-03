@@ -1,33 +1,108 @@
 package com.ectsang.sinchandroid;
 
+import android.content.ComponentName;
+import android.content.Intent;
+import android.content.ServiceConnection;
+import android.os.IBinder;
 import android.util.Log;
-
-import com.facebook.react.bridge.ReactApplicationContext;
-import com.facebook.react.bridge.ReactContextBaseJavaModule;
-import com.facebook.react.bridge.Callback;
-import com.facebook.react.bridge.ReactMethod;
-import com.facebook.react.bridge.WritableMap;
-
-import com.sinch.android.rtc.ClientRegistration;
+import com.facebook.react.bridge.*;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.sinch.android.rtc.PushPair;
-import com.sinch.android.rtc.Sinch;
-import com.sinch.android.rtc.SinchClient;
-import com.sinch.android.rtc.SinchClientListener;
 import com.sinch.android.rtc.SinchError;
 import com.sinch.android.rtc.calling.Call;
 import com.sinch.android.rtc.calling.CallClient;
+import com.sinch.android.rtc.calling.CallClientListener;
 import com.sinch.android.rtc.calling.CallListener;
-import com.sinch.android.rtc.messaging.MessageClient;
+import com.sinch.android.rtc.messaging.*;
 
+import java.text.SimpleDateFormat;
+import java.util.HashMap;
 import java.util.List;
 
-public class SinchAndroidRTCModule extends ReactContextBaseJavaModule {
+import static android.content.Context.BIND_AUTO_CREATE;
+
+public class SinchAndroidRTCModule extends ReactContextBaseJavaModule implements ServiceConnection {
 
     private ReactApplicationContext mContext;
-    private SinchClient sinchClient;
     private CallClient callClient;
-    private MessageClient messageClient;
     private Callback mCallback;
+    private SinchService.SinchServiceInterface mSinchServiceInterface;
+
+    private MessageClientInterface messageClientInterface;
+    private CallClientInterface callClientInterface;
+    private HashMap<String, Call> incomingCalls = new HashMap<>();
+    private HashMap<String, Call> outgoingCalls = new HashMap<>();
+
+    public class CallInterface implements CallListener {
+
+        @Override
+        public void onCallProgressing(Call call) {
+            Log.i("CallProgressing", call.getCallId().toString());
+        }
+
+        @Override
+        public void onCallEstablished(Call call) {
+            Log.i("CallEstablished", call.getCallId().toString());
+        }
+
+        @Override
+        public void onCallEnded(Call call) {
+            Log.i("CallEnded", call.getCallId().toString());
+            incomingCalls.remove(call.getRemoteUserId());
+        }
+
+        @Override
+        public void onShouldSendPushNotification(Call call, List<PushPair> list) {
+            Log.i("ShouldSendPushNotif", call.getCallId().toString());
+        }
+    }
+
+    public class MessageClientInterface implements MessageClientListener {
+
+        @Override
+        public void onIncomingMessage(MessageClient messageClient, Message message) {
+            String sender = message.getSenderId();
+            WritableMap map = Arguments.createMap();
+            map.putString("sender", sender);
+            map.putString("body", message.getTextBody());
+            map.putString("id", message.getMessageId());
+            map.putString("timestamp", new SimpleDateFormat("YYYYMMddHHmmss").format(message.getTimestamp()));
+            mContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                    .emit("onIncomingMessage", map);
+        }
+
+        @Override
+        public void onMessageSent(MessageClient messageClient, Message message, String s) {
+
+        }
+
+        @Override
+        public void onMessageFailed(MessageClient messageClient, Message message, MessageFailureInfo messageFailureInfo) {
+
+        }
+
+        @Override
+        public void onMessageDelivered(MessageClient messageClient, MessageDeliveryInfo messageDeliveryInfo) {
+
+        }
+
+        @Override
+        public void onShouldSendPushData(MessageClient messageClient, Message message, List<PushPair> list) {
+
+        }
+    }
+
+    public class CallClientInterface implements CallClientListener {
+        @Override
+        public void onIncomingCall(CallClient callClient, Call call) {
+            String caller = call.getRemoteUserId();
+            incomingCalls.put(caller, call);
+            WritableMap map = Arguments.createMap();
+            map.putString("caller", caller);
+            mContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                    .emit("onIncomingCall", map);
+        }
+    }
 
     public SinchAndroidRTCModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -40,129 +115,71 @@ public class SinchAndroidRTCModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void init(String applicationKey,
-                     String applicationSecret,
-                     String environmentHost,
-                     String userId) {
-
-        sinchClient = Sinch.getSinchClientBuilder()
-                .context(mContext)
-                .applicationKey(applicationKey)
-                .applicationSecret(applicationSecret)
-                .environmentHost(environmentHost)
-                .userId(userId)
-                .build();
-
-        sinchClient.setSupportMessaging(true);
-        sinchClient.setSupportCalling(true);
-        sinchClient.setSupportManagedPush(true);
+    public void init(String applicationKey, String applicationSecret, String environmentHost, String userId) {
+        SinchService.APP_KEY = applicationKey;
+        SinchService.APP_SECRET = applicationSecret;
+        if (environmentHost != null)
+            SinchService.ENVIRONMENT = environmentHost;
+        SinchService.USER_ID = userId;
+        mContext.bindService(new Intent(mContext, SinchService.class), this, BIND_AUTO_CREATE);
     }
 
     @ReactMethod
     public void startSinchClient(Callback callback) {
         mCallback = callback;
-
-        sinchClient.addSinchClientListener(new SinchClientListener() {
-            public void onClientStarted(SinchClient client) {
-            }
-
-            public void onClientStopped(SinchClient client) {
-            }
-
-            public void onClientFailed(SinchClient client, SinchError error) {
-            }
-
-            public void onRegistrationCredentialsRequired(SinchClient client, ClientRegistration registrationCallback) {
-            }
-
-            public void onLogMessage(int level, String area, String message) {
-            }
-        });
-        sinchClient.start();
+        if (mSinchServiceInterface != null) {
+            mSinchServiceInterface.startClient();
+        }
     }
 
     @ReactMethod
     public void terminateSinchClient() {
-        sinchClient.stopListeningOnActiveConnection();
-        sinchClient.terminateGracefully();
+        if (mSinchServiceInterface != null) {
+            if (messageClientInterface != null) {
+                mSinchServiceInterface.removeMessageClientListener(messageClientInterface);
+                messageClientInterface = null;
+            }
+            if (callClientInterface != null) {
+                mSinchServiceInterface.removeCallClientListener(callClientInterface);
+                callClientInterface = null;
+            }
+            mSinchServiceInterface.stopClient();
+            mSinchServiceInterface = null;
+            incomingCalls.clear();
+        }
     }
 
     @ReactMethod
     public void setupAppToAppCall(String remoteUserId) {
-        callClient = sinchClient.getCallClient();
+        callClient = mSinchServiceInterface.getCallClient();
         Call call = callClient.callUser(remoteUserId);
-        // Or for video call: Call call = callClient.callUserVideo("<remote user id>");
-        call.addCallListener(new CallListener() {
-            @Override
-            public void onCallProgressing(Call call) {
-                Log.i("CallProgressing", call.getCallId().toString());
-            }
-
-            @Override
-            public void onCallEstablished(Call call) {
-                Log.i("CallEstablished", call.getCallId().toString());
-            }
-
-            @Override
-            public void onCallEnded(Call call) {
-                Log.i("CallEnded", call.getCallId().toString());
-            }
-
-            @Override
-            public void onShouldSendPushNotification(Call call, List<PushPair> list) {
-                Log.i("ShouldSendPushNotif", call.getCallId().toString());
-            }
-        });
+        call.addCallListener(new CallInterface());
     }
 
     @ReactMethod
     public void setupConferenceCall(String conferenceId) {
-        callClient = sinchClient.getCallClient();
+        callClient = mSinchServiceInterface.getCallClient();
         Call call = callClient.callConference(conferenceId);
-        call.addCallListener(new CallListener() {
-            @Override
-            public void onCallProgressing(Call call) {
-                Log.i("CallProgressing", call.getCallId().toString());
-            }
-
-            @Override
-            public void onCallEstablished(Call call) {
-                Log.i("CallEstablished", call.getCallId().toString());
-            }
-
-            @Override
-            public void onCallEnded(Call call) {
-                Log.i("CallEnded", call.getCallId().toString());
-            }
-
-            @Override
-            public void onShouldSendPushNotification(Call call, List<PushPair> list) {
-                Log.i("ShouldSendPushNotif", call.getCallId().toString());
-            }
-        });
-    }
-
-
-    @ReactMethod
-    public void answerIncomingCall(Call call) {
-        Log.i("answerIncomingCall", call.getCallId().toString());
-
-        // User answers the call
-        call.answer();
-        // Stop playing ring tone
-        // ...
+        call.addCallListener(new CallInterface());
     }
 
     @ReactMethod
-    public void declineIncomingCall(Call call) {
-        Log.i("declineIncomingCall", call.getCallId().toString());
-
-        // User does not want to answer
-        call.hangup();
-        // Stop playing ring tone
-        // ...
+    public void answerIncomingCall(String caller) {
+        Call call = incomingCalls.get(caller);
+        if (call != null) {
+            call.addCallListener(new CallInterface());
+            call.answer();
+        }
     }
 
+    @ReactMethod
+    public void declineIncomingCall(String caller) {
+        Call call = incomingCalls.get(caller);
+        if (call != null) {
+            call.hangup();
+            incomingCalls.remove(caller);
+        }
+    }
 
     private void consumeCallback(Boolean success, WritableMap payload) {
         if (mCallback != null) {
@@ -175,4 +192,32 @@ public class SinchAndroidRTCModule extends ReactContextBaseJavaModule {
         }
     }
 
+    @Override
+    public void onServiceConnected(ComponentName name, IBinder service) {
+        if (SinchService.class.getName().equals(name.getClassName())) {
+            mSinchServiceInterface = (SinchService.SinchServiceInterface) service;
+            mSinchServiceInterface.setStartListener(new SinchService.StartFailedListener() {
+                @Override
+                public void onStartFailed(SinchError error) {
+                    consumeCallback(false, new WritableNativeMap());
+                }
+
+                @Override
+                public void onStarted() {
+                    consumeCallback(true, new WritableNativeMap());
+                }
+            });
+            messageClientInterface = new MessageClientInterface();
+            mSinchServiceInterface.addMessageClientListener(messageClientInterface);
+            callClientInterface = new CallClientInterface();
+            mSinchServiceInterface.addCallClientListener(callClientInterface);
+        }
+    }
+
+    @Override
+    public void onServiceDisconnected(ComponentName name) {
+        if (SinchService.class.getName().equals(name.getClassName())) {
+            terminateSinchClient();
+        }
+    }
 }

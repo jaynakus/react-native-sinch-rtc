@@ -2,10 +2,8 @@ var React = require('react-native');
 var NativeModules = React.NativeModules;
 var Platform = React.Platform;
 var invariant = require('invariant');
-// var SinchVerificationIOS = NativeModules.SinchVerificationIOS;
-// var SinchVerificationAndroid = NativeModules.SinchVerificationAndroid;
+var DeviceEventEmitter = React.DeviceEventEmitter;
 var SinchRTC;
-
 
 if (Platform.OS === 'ios') {
     // invariant(SinchVerificationIOS, 'Add SinchVerificationIOS.h and SinchVerificationIOS.m to your Xcode project');
@@ -22,58 +20,93 @@ var applicationKey = null,
     applicationSecret = null,
     environmentHost = null,
     userId = null;
-
+var listeners = {};
 module.exports = {
 
-	init: function(appKey, appSecret, envHost, uId) {
-		applicationKey = appKey;
-    applicationSecret = appSecret;
-    environmentHost = envHost;
-    userId = uId;
+    addListener: function (eventName, callback) {
+        var callBacks = [];
+        if (listeners[eventName]) {
+            callBacks = listeners[eventName];
+        }
+        callBacks.push(callback);
+        listeners[eventName] = callBacks;
+    },
+    removeListener: function (eventName, callbackRef) {
+        var i = listeners[eventName].indexOf(callbackRef);
+        if (i != -1) {
+            listeners[eventName].splice(i, 1);
+        }
 
-    SinchRTC.init(appKey, appSecret, envHost, uId);
-	},
+        if (!listeners[eventName].length) {
+            removeAllListeners(eventName);
+        }
+    },
 
-  startSinchClient: function(callback) {
-    invariant(applicationKey, 'Call init() to setup the Sinch application key.');
-    SinchRTC.startSinchClient(callback);
-  },
+    removeAllListeners: function (eventName) {
+        delete listeners[eventName];
+    },
 
-  terminateSinchClient: function() {
-    invariant(applicationKey, 'Call init() to setup the Sinch application key.');
-    SinchRTC.terminateSinchClient();
-  },
+    init: function (appKey, appSecret, envHost, uId) {
+        applicationKey = appKey;
+        applicationSecret = appSecret;
+        environmentHost = envHost;
+        userId = uId;
 
-  setupAppToAppCall: function(remoteUserId) {
-    invariant(applicationKey, 'Call init() to setup the Sinch application key.');
-    SinchRTC.setupAppToAppCall(remoteUserId);
-  },
+        SinchRTC.init(appKey, appSecret, envHost, uId);
+        DeviceEventEmitter.addListener('onIncomingCall', function (caller) {
+            for (var i = 0; i < listeners['call'].length; i++) {
+                var listener = listeners['call'][i];
+                listener(caller);
+            }
+        });
+        DeviceEventEmitter.addListener('onIncomingMessage', function (message) {
+            for (var i = 0; i < listeners['message'].length; i++) {
+                var listener = listeners['message'][i];
+                listener(message);
+            }
+        })
+    },
 
-  setupConferenceCall: function(conferenceId) {
-    invariant(applicationKey, 'Call init() to setup the Sinch application key.');
-    SinchRTC.setupConferenceCall(conferenceId);
-  },
+    startSinchClient: function (callback) {
+        invariant(applicationKey, 'Call init() to setup the Sinch application key.');
+        SinchRTC.startSinchClient(callback);
+    },
 
-  answerIncomingCall: function(call) {
-    invariant(applicationKey, 'Call init() to setup the Sinch application key.');
-    SinchRTC.answerIncomingCall(call);
-  },
+    terminateSinchClient: function () {
+        invariant(applicationKey, 'Call init() to setup the Sinch application key.');
+        SinchRTC.terminateSinchClient();
+    },
 
-  declineIncomingCall: function(call) {
-    invariant(applicationKey, 'Call init() to setup the Sinch application key.');
-    SinchRTC.declineIncomingCall(call);
-  },
+    setupAppToAppCall: function (remoteUserId) {
+        invariant(applicationKey, 'Call init() to setup the Sinch application key.');
+        SinchRTC.setupAppToAppCall(remoteUserId);
+    },
 
-	// sms: function(phoneNumber, custom, callback) {
-	// 	invariant(applicationKey, 'Call init() to setup the Sinch application key.');
-	// 	SinchVerification.sms(applicationKey, phoneNumber, custom, callback);
-	// },
-  //
-	// flashCall: function(phoneNumber, custom, callback) {
-	// 	invariant(applicationKey, 'Call init() to setup the Sinch application key.');
-	// 	SinchVerification.flashCall(applicationKey, phoneNumber, custom, callback);
-	// },
-  //
-	// verify: SinchVerification.verify,
+    setupConferenceCall: function (conferenceId) {
+        invariant(applicationKey, 'Call init() to setup the Sinch application key.');
+        SinchRTC.setupConferenceCall(conferenceId);
+    },
+
+    answerIncomingCall: function (call) {
+        invariant(applicationKey, 'Call init() to setup the Sinch application key.');
+        SinchRTC.answerIncomingCall(call);
+    },
+
+    declineIncomingCall: function (call) {
+        invariant(applicationKey, 'Call init() to setup the Sinch application key.');
+        SinchRTC.declineIncomingCall(call);
+    },
+
+    // sms: function(phoneNumber, custom, callback) {
+    // 	invariant(applicationKey, 'Call init() to setup the Sinch application key.');
+    // 	SinchVerification.sms(applicationKey, phoneNumber, custom, callback);
+    // },
+    //
+    // flashCall: function(phoneNumber, custom, callback) {
+    // 	invariant(applicationKey, 'Call init() to setup the Sinch application key.');
+    // 	SinchVerification.flashCall(applicationKey, phoneNumber, custom, callback);
+    // },
+    //
+    // verify: SinchVerification.verify,
 
 }
